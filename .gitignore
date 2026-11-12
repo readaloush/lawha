@@ -5,3 +5,6 @@ __pycache__/
 results/runs/
 *.pt
 !results/reader_fp16.pt
+docs/ort
+results/*.onnx
+results/pipeline_errors.json
