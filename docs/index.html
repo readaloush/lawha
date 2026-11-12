@@ -3,104 +3,147 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lawha · Arabic licence plate recognition in the browser</title>
-<meta name="description" content="Pick a photo of a car: a YOLO detector finds the plate and a CRNN reads its Arabic letters and digits, entirely in your browser.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Crect x='5' y='10' width='22' height='12' rx='2' fill='white'/%3E%3Crect x='5' y='10' width='22' height='4' rx='2' fill='%2338bdf8'/%3E%3C/svg%3E">
+<title>Lawha: reads Egyptian licence plates from a photo</title>
+<meta name="description" content="Choose a photo of a car. A detector finds the plate and a second network reads its Arabic letters and digits, entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='1' y='7' width='30' height='18' rx='3' fill='white' stroke='%2314171a' stroke-width='2'/%3E%3Crect x='2' y='8' width='28' height='6' fill='%232e9be6'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=Noto+Kufi+Arabic:wght@500;700&display=swap" rel="stylesheet">
 <style>
+  /* Palette taken from the object itself: the plate's blue band, its white body and black
+     glyphs, the asphalt it sits above, and the yellow of road markings. */
   :root {
-    --paper: #f6f1e7; --card: #fffdf8; --ink: #1c1a17; --muted: #746d62;
-    --line: #e2d9c8; --accent: #0f766e; --accent-soft: #d6ebe7; --warn: #b45309;
-    --arabic: "Noto Naskh Arabic", "Amiri", "Scheherazade New", "Geeza Pro", "Traditional Arabic", "Segoe UI", serif;
-    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --concrete: #e6e9ed; --asphalt: #23272d; --asphalt-2: #2f343b; --ink: #14171a;
+    --plate: #fbfbf9; --band: #2e9be6; --marking: #f2c200; --dim: #5d6670; --dim-on-dark: #a3acb6;
+    --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", Arial, sans-serif;
+    --body: "Barlow", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    --kufi: "Noto Kufi Arabic", "Geeza Pro", "Segoe UI", Tahoma, sans-serif;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); }
-  main { max-width: 980px; margin: 0 auto; padding: 44px 20px 56px; }
-  header { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
-  h1 { font-size: 34px; letter-spacing: -0.02em; margin: 0; font-weight: 700; }
-  h1 span { font-family: var(--arabic); font-weight: 400; color: var(--accent); margin-inline-start: 10px; font-size: 38px; }
-  #status { font: 12px var(--mono); color: var(--muted); }
-  .lede { color: var(--muted); max-width: 62ch; margin: 0 0 22px; }
-  .seg { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
-  .seg button { border: 0; background: transparent; padding: 5px 11px; border-radius: 7px; font-size: 13px; color: var(--muted); }
-  .seg button:hover { color: var(--ink); }
-  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--card); }
-  .langs { margin-inline-start: auto; align-self: center; }
-  button, .btn { font: 600 14px var(--sans); padding: 9px 16px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; white-space: nowrap; }
-  button:hover, .btn:hover { border-color: var(--ink); }
-  button:focus-visible, .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-  button:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
-  .btn.primary { background: var(--ink); color: var(--card); border-color: var(--ink); }
-  .btn input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-  .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 22px; align-items: start; }
-  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } main { padding-top: 28px; } }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
-  .label { font: 600 11px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
-  .stage { position: relative; border-radius: 10px; overflow: hidden; background: #ece5d6; border: 1px dashed var(--line); min-height: 300px; display: grid; place-items: center; }
-  .stage.over { border-color: var(--accent); background: var(--accent-soft); }
-  .stage canvas { display: block; width: 100%; height: auto; }
-  .stage .empty { color: var(--muted); text-align: center; padding: 30px; font-size: 14px; max-width: 34ch; }
-  .row { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
-  .hint { color: var(--muted); font-size: 13px; }
-  .plates { display: grid; gap: 12px; }
-  .plate { display: grid; grid-template-columns: 132px 1fr; gap: 14px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
-  .plate canvas { width: 132px; height: 66px; border-radius: 6px; background: #000; }
-  .read { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; direction: ltr; }
-  .read .digits { font: 600 30px/1.2 var(--arabic); letter-spacing: 0.04em; }
-  .read .letters { font: 600 30px/1.2 var(--arabic); color: var(--accent); word-spacing: 0.25em; }
-  .read .bar { width: 1px; align-self: stretch; background: var(--line); }
-  .meta { font: 12px var(--mono); color: var(--muted); margin-top: 2px; direction: ltr; text-align: start; }
-  .none { color: var(--muted); font-size: 14px; margin: 0; }
-  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }
-  @media (max-width: 800px) { .facts { grid-template-columns: repeat(2, 1fr); } }
-  .fact { border-top: 2px solid var(--ink); padding-top: 10px; }
-  .fact b { display: block; font: 600 22px var(--mono); letter-spacing: -0.02em; direction: ltr; }
-  html[dir="rtl"] .fact b { text-align: end; }
-  .fact span { font-size: 13px; color: var(--muted); }
-  footer { margin-top: 28px; font-size: 13px; color: var(--muted); }
-  a { color: var(--accent); }
-  html[lang="ar"] body { font-family: var(--arabic), var(--sans); font-size: 17px; }
-  html[lang="ar"] .label { letter-spacing: 0; font-size: 13px; }
-  html[lang="ar"] #status { font-family: var(--arabic); font-size: 14px; }
+  body { margin: 0; background: var(--concrete); color: var(--ink); font: 400 17px/1.5 var(--body); }
+  html[lang="ar"] body { font-family: var(--kufi); font-size: 16px; line-height: 1.8; }
+  a { color: inherit; text-underline-offset: 3px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* top line: plate-shaped wordmark on the left, languages as plain links on the right */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 0 0; }
+  .mark { flex: none; display: inline-grid; grid-template-columns: auto auto; border: 2.5px solid var(--ink); border-radius: 6px; overflow: hidden; background: var(--plate); text-decoration: none; }
+  .mark b { font: 700 22px/1 var(--display); letter-spacing: 0.06em; padding: 7px 12px 6px; }
+  .mark span { font: 700 17px/1 var(--kufi); background: var(--band); color: #fff; padding: 8px 11px 7px; display: grid; place-items: center; }
+  .langs { display: flex; gap: 18px; font-size: 15px; }
+  @media (max-width: 480px) { .langs { gap: 12px; font-size: 14px; } .mark b { font-size: 19px; padding-inline: 9px; } }
+  .langs button { all: unset; cursor: pointer; color: var(--dim); padding: 4px 0; }
+  .langs button:hover { color: var(--ink); }
+  .langs button[aria-pressed="true"] { color: var(--ink); box-shadow: 0 2px 0 var(--ink); }
+  .langs button:focus-visible { outline: 2px solid var(--band); outline-offset: 4px; }
+
+  h1 { font: 700 clamp(40px, 7vw, 76px)/0.98 var(--display); letter-spacing: -0.005em; margin: 44px 0 14px; max-width: 14ch; text-wrap: balance; }
+  html[lang="ar"] h1 { font-family: var(--kufi); font-size: clamp(30px, 5vw, 52px); line-height: 1.35; max-width: 18ch; }
+  .lede { max-width: 56ch; margin: 0 0 30px; color: #3a4149; }
+
+  /* the bench: one dark slab holding the photo and what was read from it */
+  .bench { background: var(--asphalt); color: #eef1f4; }
+  .bench .wrap { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0; padding-top: 0; padding-bottom: 0; }
+  @media (max-width: 860px) { .bench .wrap { grid-template-columns: 1fr; } }
+  .shot { padding: 28px 28px 28px 0; }
+  .read { padding: 28px 0 28px 28px; border-inline-start: 1px solid var(--asphalt-2); display: flex; flex-direction: column; }
+  @media (max-width: 860px) { .shot { padding: 24px 0 8px; } .read { padding: 16px 0 28px; border: 0; } }
+
+  .finder { position: relative; min-height: 0; display: grid; place-items: center; background: #1a1d22; }
+  .finder::before, .finder::after, .finder i::before, .finder i::after { content: ""; position: absolute; width: 26px; height: 26px; border: 3px solid var(--marking); pointer-events: none; }
+  .finder::before { top: 0; inset-inline-start: 0; border-inline-end: 0; border-bottom: 0; }
+  .finder::after { top: 0; inset-inline-end: 0; border-inline-start: 0; border-bottom: 0; }
+  .finder i::before { bottom: 0; inset-inline-start: 0; border-inline-end: 0; border-top: 0; }
+  .finder i::after { bottom: 0; inset-inline-end: 0; border-inline-start: 0; border-top: 0; }
+  .finder.over { background: #20303d; }
+  .finder canvas { display: block; width: 100%; height: auto; }
+  .ask { text-align: center; padding: 110px 24px; }
+  .ask p { margin: 14px 0 0; color: var(--dim-on-dark); font-size: 15px; }
+  .pick { display: inline-block; position: relative; cursor: pointer; font: 600 17px/1 var(--body); color: var(--ink); background: var(--marking); padding: 14px 22px; border-radius: 4px; }
+  html[lang="ar"] .pick { font-family: var(--kufi); }
+  .pick:hover { background: #ffd21f; }
+  .pick:focus-within { outline: 2px solid #fff; outline-offset: 3px; }
+  .pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .again { margin-top: 12px; font-size: 15px; color: var(--dim-on-dark); }
+  .again label { position: relative; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; color: #eef1f4; }
+  .again input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  .state { font-size: 15px; color: var(--dim-on-dark); margin: 0 0 18px; min-height: 1.5em; }
+  .state.bad { color: #ffb4a8; }
+  .found { display: grid; gap: 26px; }
+  .hit { display: grid; gap: 10px; }
+  /* the reading, redrawn as the plate it came from */
+  .tag { direction: ltr; width: min(100%, 380px); aspect-ratio: 2 / 1; background: var(--plate); color: var(--ink); border: 4px solid var(--ink); border-radius: 10px; overflow: hidden; display: grid; grid-template-rows: 27% 1fr; box-shadow: 0 0 0 2px #cfd4da; }
+  .tag .band { background: var(--band); display: flex; justify-content: space-between; align-items: center; padding: 0 6%; color: #0d2a44; }
+  .tag .band b { font: 700 clamp(13px, 2.4vw, 19px)/1 var(--display); letter-spacing: 0.12em; }
+  .tag .band span { font: 700 clamp(14px, 2.6vw, 20px)/1 var(--kufi); }
+  .tag .body { display: grid; grid-template-columns: 1fr 1fr; }
+  .tag .body > div { display: grid; place-items: center; font: 700 clamp(26px, 5.4vw, 46px)/1 var(--kufi); white-space: nowrap; }
+  .tag .body > div + div { border-inline-start: 3px solid var(--ink); word-spacing: 0.12em; }
+  .tag.blank { opacity: 0.22; }
+  .from { display: flex; gap: 12px; align-items: center; font-size: 14px; color: var(--dim-on-dark); }
+  .from canvas { width: 96px; height: 32px; border-radius: 2px; }
+  .none { margin: 0; color: var(--dim-on-dark); max-width: 34ch; }
+
+  /* test-set funnel: a real sequence, so it is drawn as one */
+  .proof { padding: 54px 0 20px; }
+  .proof h2 { font: 700 30px/1.1 var(--display); margin: 0 0 6px; }
+  html[lang="ar"] .proof h2 { font-family: var(--kufi); font-size: 24px; line-height: 1.5; }
+  .proof > .wrap > p { margin: 0 0 22px; max-width: 62ch; color: #3a4149; }
+  .funnel { display: grid; gap: 8px; max-width: 760px; }
+  .step { display: grid; grid-template-columns: 5.2ch 1fr; gap: 14px; align-items: center; }
+  .step b { font: 700 26px/1 var(--display); text-align: end; direction: ltr; }
+  .step .lane { position: relative; height: 34px; background: #d3d8de; }
+  .step .lane i { position: absolute; inset-block: 0; inset-inline-start: 0; background: var(--asphalt); }
+  .step:last-child .lane i { background: var(--band); }
+  .step .lane span { position: absolute; inset-block: 0; inset-inline-start: 12px; display: flex; align-items: center; color: #fff; font-size: 15px; white-space: nowrap; }
+  @media (max-width: 560px) { .step .lane span { font-size: 13px; } }
+  .notes { padding-block: 26px 60px; }
+  .notes p { max-width: 68ch; margin: 0 0 10px; font-size: 15px; color: var(--dim); }
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>Lawha<span lang="ar">لوحة</span></h1>
-    <span id="status"></span>
-    <div class="langs seg" role="group" aria-label="Language">
+<div class="wrap">
+  <div class="top">
+    <a class="mark" href="https://github.com/readaloush/lawha" aria-label="Lawha on GitHub"><b>LAWHA</b><span lang="ar">لوحة</span></a>
+    <div class="langs" role="group" aria-label="Language">
       <button data-lang="en" lang="en">English</button>
       <button data-lang="tr" lang="tr">Türkçe</button>
       <button data-lang="ar" lang="ar">العربية</button>
     </div>
-  </header>
+  </div>
+  <h1 data-i18n="h1"></h1>
   <p class="lede" data-i18n="lede"></p>
+</div>
 
-  <div class="grid">
-    <section class="card">
-      <p class="label" data-i18n="photo"></p>
-      <div class="stage" id="stage">
-        <p class="empty" id="empty" data-i18n="empty"></p>
+<section class="bench">
+  <div class="wrap">
+    <div class="shot">
+      <div class="finder" id="stage"><i></i>
+        <div class="ask" id="empty">
+          <label class="pick"><input type="file" id="file" accept="image/*"><span data-i18n="choose"></span></label>
+          <p data-i18n="drop"></p>
+        </div>
         <canvas id="view" hidden></canvas>
       </div>
-      <div class="row">
-        <label class="btn primary"><input type="file" id="file" accept="image/*"><span data-i18n="choose"></span></label>
-        <span class="hint" data-i18n="hint"></span>
-      </div>
-    </section>
-
-    <section class="card" aria-live="polite">
-      <p class="label" data-i18n="result"></p>
-      <div class="plates" id="plates"></div>
-    </section>
+      <div class="again" id="again" hidden><label><input type="file" id="file2" accept="image/*"><span data-i18n="another"></span></label></div>
+    </div>
+    <div class="read" aria-live="polite">
+      <p class="state" id="status"></p>
+      <div class="found" id="plates"></div>
+    </div>
   </div>
+</section>
 
-  <div class="facts" id="facts"></div>
-  <footer id="footer"></footer>
-</main>
+<section class="proof">
+  <div class="wrap">
+    <h2 data-i18n="proofTitle"></h2>
+    <p data-i18n="proofText"></p>
+    <div class="funnel" id="funnel"></div>
+  </div>
+</section>
+<div class="wrap notes" id="notes"></div>
 
 <script>
 // onnxruntime-web: a local copy in ./ort/ is used if present (development), otherwise the CDN.
@@ -122,43 +165,57 @@ const LETTERS = [..."أبجدرسصطعفقلمنهوى"], DIGITS = [..."٠١٢�
 const CLASSES = [...LETTERS, ...DIGITS], BLANK = CLASSES.length;
 const DET = 640, RH = 48, RW = 144, CONF = 0.25, NMS_IOU = 0.7, PAD = 0.10;
 
-const REPO = '<a href="https://github.com/readaloush/lawha">github.com/readaloush/lawha</a>';
 const T = {
   en: {
-    title: "Lawha · Arabic licence plate recognition in the browser",
-    lede: "Pick a photo of a car with an Egyptian plate. A YOLO detector finds the plate and a CRNN reads its Arabic letters and digits, all on your device; the photo is never uploaded.",
-    photo: "Photo", result: "Plates found", choose: "Choose a photo", hint: "or drop an image here",
-    empty: "No photo yet. Choose one or drop one here.",
-    waiting: "Results appear here.", nothing: "No plate found in this image.",
-    conf: (c, ms) => `detector confidence ${c}% · ${ms} ms`,
-    loading: p => `loading models… ${p}%`, ready: ms => `models ready · ${ms} ms`, failed: m => "could not load the models: " + m,
-    file: "opened as a file: browsers block the models here. Run  python3 -m http.server 8000  in this folder and open http://localhost:8000",
-    f1: "of test plates found by the detector", f2: "of cropped test plates read with no mistake", f3: "found and fully read, end to end", f4: () => "test vehicles the models never saw",
-    footer: `Trained on the EALPR dataset of Egyptian plates (Youssef, Sayed &amp; Ali, 2022). The data comes mostly from listings of special plates, so everyday plates and other countries' plates may read worse than the test figures; computer-drawn plates are read badly. Code and details: ${REPO}.`,
+    title: "Lawha: reads Egyptian licence plates from a photo",
+    h1: "Reads Egyptian licence plates from a photo.",
+    lede: "One network finds the plate, a second reads its Arabic letters and digits. Both run in this tab, so your photo stays on your device.",
+    choose: "Choose a photo", drop: "or drop an image anywhere in this frame", another: "Try another photo",
+    loading: p => `Loading the two models, ${p}%`, ready: "Ready. Choose a photo of a car.", working: "Looking for plates",
+    failed: m => "The models could not be loaded: " + m,
+    file: "This page was opened as a file, and browsers block the models that way. Run “python3 -m http.server 8000” in this folder and open http://localhost:8000.",
+    done: (n, d, r) => (n === 1 ? "1 plate" : `${n} plates`) + ` found in ${d} ms, read in ${r} ms.`,
+    nothing: ms => `No plate found (${ms} ms). The models know Egyptian plates photographed from the front or rear.`,
+    from: c => `Cut from your photo. Detector confidence ${c}%.`,
+    proofTitle: "How often it gets a plate right",
+    proofText: "Measured on vehicles neither model saw in training. A plate only counts at the last step if every character was read correctly.",
+    s1: "labelled plates in the test photos", s2: "found by the detector", s3: v => `found and read with no mistake (${v}%)`,
+    notes: ['Trained on <a href="https://github.com/ahmedramadan96/EALPR">EALPR</a>, a dataset of Egyptian plates collected mostly from listings of special plates. Everyday plates and plates from other countries may read worse, and computer-drawn plates read badly.',
+            'Method, error audit and code: <a href="https://github.com/readaloush/lawha">github.com/readaloush/lawha</a>. Built by <a href="https://readaloush.com">Read Aloush</a>.'],
   },
   tr: {
-    title: "Lawha · Tarayıcıda Arapça plaka tanıma",
-    lede: "Mısır plakalı bir araç fotoğrafı seçin. Bir YOLO modeli plakayı bulur, bir CRNN de üzerindeki Arapça harf ve rakamları okur; hepsi kendi cihazınızda çalışır, fotoğraf hiçbir yere yüklenmez.",
-    photo: "Fotoğraf", result: "Bulunan plakalar", choose: "Fotoğraf seç", hint: "ya da bir görseli buraya bırakın",
-    empty: "Henüz fotoğraf yok. Bir tane seçin ya da buraya bırakın.",
-    waiting: "Sonuçlar burada görünür.", nothing: "Bu görselde plaka bulunamadı.",
-    conf: (c, ms) => `tespit güveni %${c} · ${ms} ms`,
-    loading: p => `modeller yükleniyor… %${p}`, ready: ms => `modeller hazır · ${ms} ms`, failed: m => "modeller yüklenemedi: " + m,
-    file: "sayfa dosyadan açıldı: tarayıcılar burada modelleri engeller. Bu klasörde  python3 -m http.server 8000  çalıştırıp http://localhost:8000 adresini açın",
-    f1: "test plakasını tespit modeli buldu", f2: "kesilmiş test plakası hatasız okundu", f3: "uçtan uca: bulundu ve tamamen okundu", f4: () => "modellerin hiç görmediği test aracı",
-    footer: `Mısır plakalarından oluşan EALPR veri setiyle eğitildi (Youssef, Sayed &amp; Ali, 2022). Veri çoğunlukla özel plaka ilanlarından geldiği için sıradan plakalar ve başka ülkelerin plakaları test sonuçlarından daha kötü okunabilir; bilgisayarla çizilmiş plakalar kötü okunuyor. Kod ve ayrıntılar: ${REPO}.`,
+    title: "Lawha: fotoğraftan Mısır plakası okur",
+    h1: "Fotoğraftan Mısır plakası okur.",
+    lede: "Bir ağ plakayı bulur, ikincisi üzerindeki Arapça harf ve rakamları okur. İkisi de bu sekmede çalışır; fotoğrafınız cihazınızdan çıkmaz.",
+    choose: "Fotoğraf seç", drop: "ya da bir görseli bu çerçeveye bırakın", another: "Başka bir fotoğraf dene",
+    loading: p => `İki model yükleniyor, %${p}`, ready: "Hazır. Bir araç fotoğrafı seçin.", working: "Plaka aranıyor",
+    failed: m => "Modeller yüklenemedi: " + m,
+    file: "Sayfa dosya olarak açıldı; tarayıcılar bu şekilde modelleri engeller. Bu klasörde “python3 -m http.server 8000” çalıştırıp http://localhost:8000 adresini açın.",
+    done: (n, d, r) => `${n} plaka ${d} ms'de bulundu, ${r} ms'de okundu.`,
+    nothing: ms => `Plaka bulunamadı (${ms} ms). Modeller önden ya da arkadan çekilmiş Mısır plakalarını tanır.`,
+    from: c => `Fotoğrafınızdan kesildi. Tespit güveni %${c}.`,
+    proofTitle: "Plakayı ne sıklıkla doğru okuyor",
+    proofText: "İki modelin de eğitimde görmediği araçlarda ölçüldü. Bir plaka son adımda ancak tüm karakterleri doğru okunduysa sayılır.",
+    s1: "test fotoğraflarındaki etiketli plaka", s2: "tespit modelinin bulduğu", s3: v => `bulunan ve hatasız okunan (%${v})`,
+    notes: ['Çoğunlukla özel plaka ilanlarından toplanmış Mısır plakaları veri seti <a href="https://github.com/ahmedramadan96/EALPR">EALPR</a> ile eğitildi. Sıradan plakalar ve başka ülkelerin plakaları daha kötü okunabilir; bilgisayarla çizilmiş plakalar kötü okunuyor.',
+            'Yöntem, hata incelemesi ve kod: <a href="https://github.com/readaloush/lawha">github.com/readaloush/lawha</a>. Hazırlayan: <a href="https://readaloush.com">Read Aloush</a>.'],
   },
   ar: {
-    title: "لوحة · التعرّف على لوحات السيارات العربية داخل المتصفح",
-    lede: "اختر صورة سيارة بلوحة مصرية. نموذج YOLO يحدّد مكان اللوحة، وشبكة CRNN تقرأ حروفها وأرقامها العربية، وكل ذلك على جهازك؛ الصورة لا تُرفع إلى أي مكان.",
-    photo: "الصورة", result: "اللوحات المكتشفة", choose: "اختر صورة", hint: "أو أفلِت صورة هنا",
-    empty: "لا توجد صورة بعد. اختر واحدة أو أفلِتها هنا.",
-    waiting: "تظهر النتائج هنا.", nothing: "لم يُعثر على لوحة في هذه الصورة.",
-    conf: (c, ms) => `ثقة الكاشف ${c}% · ⁦${ms} ms⁩`,
-    loading: p => `جارٍ تحميل النماذج… ${p}%`, ready: ms => `النماذج جاهزة · ⁦${ms} ms⁩`, failed: m => "تعذّر تحميل النماذج: " + m,
-    file: "فُتحت الصفحة كملف: المتصفحات تمنع تحميل النماذج هنا. شغّل  python3 -m http.server 8000  في هذا المجلد وافتح http://localhost:8000",
-    f1: "من لوحات الاختبار عثر عليها الكاشف", f2: "من لوحات الاختبار المقصوصة قُرئت بلا خطأ", f3: "عُثر عليها وقُرئت كاملةً", f4: () => "مركبة اختبار لم ترها النماذج",
-    footer: `دُرِّبت النماذج على مجموعة بيانات EALPR للوحات المصرية (Youssef, Sayed &amp; Ali, 2022). معظم البيانات من إعلانات اللوحات المميزة، لذا قد تُقرأ اللوحات العادية ولوحات الدول الأخرى بدقة أقل من أرقام الاختبار، أما اللوحات المرسومة حاسوبيًا فتُقرأ بشكل سيئ. الشيفرة والتفاصيل: ${REPO}.`,
+    title: "لوحة: يقرأ لوحات السيارات المصرية من صورة",
+    h1: "يقرأ لوحات السيارات المصرية من صورة.",
+    lede: "شبكة تحدّد مكان اللوحة، وأخرى تقرأ حروفها وأرقامها العربية. تعملان معًا في هذه الصفحة، فتبقى صورتك على جهازك.",
+    choose: "اختر صورة", drop: "أو أفلِت صورة داخل هذا الإطار", another: "جرّب صورة أخرى",
+    loading: p => `جارٍ تحميل النموذجين، ${p}%`, ready: "جاهز. اختر صورة سيارة.", working: "جارٍ البحث عن اللوحات",
+    failed: m => "تعذّر تحميل النموذجين: " + m,
+    file: "فُتحت الصفحة كملف، والمتصفحات تمنع تحميل النماذج بهذه الطريقة. شغّل “python3 -m http.server 8000” في هذا المجلد وافتح http://localhost:8000.",
+    done: (n, d, r) => `عُثر على ${n === 1 ? "لوحة واحدة" : n + " لوحات"} في ⁦${d} ms⁩ وقُرئت في ⁦${r} ms⁩.`,
+    nothing: ms => `لم يُعثر على لوحة (⁦${ms} ms⁩). النموذجان يعرفان اللوحات المصرية المصوَّرة من الأمام أو الخلف.`,
+    from: c => `مقصوصة من صورتك. ثقة الكاشف ${c}%.`,
+    proofTitle: "كم مرة يقرأ اللوحة صحيحةً",
+    proofText: "قِيس على مركبات لم يرها أيٌّ من النموذجين أثناء التدريب. لا تُحتسب اللوحة في الخطوة الأخيرة إلا إذا قُرئ كل حرف فيها صحيحًا.",
+    s1: "لوحة موسومة في صور الاختبار", s2: "عثر عليها الكاشف", s3: v => `عُثر عليها وقُرئت بلا خطأ (${v}%)`,
+    notes: ['دُرِّب على <a href="https://github.com/ahmedramadan96/EALPR">EALPR</a>، مجموعة بيانات للوحات المصرية جُمع معظمها من إعلانات اللوحات المميزة. قد تُقرأ اللوحات العادية ولوحات الدول الأخرى بدقة أقل، أما اللوحات المرسومة حاسوبيًا فتُقرأ بشكل سيئ.',
+            'المنهج ومراجعة الأخطاء والشيفرة: <a href="https://github.com/readaloush/lawha">github.com/readaloush/lawha</a>. إعداد: <a href="https://readaloush.com">Read Aloush</a>.'],
   },
 };
 
@@ -177,12 +234,13 @@ function render() {
   document.title = t("title");
   document.querySelectorAll("[data-i18n]").forEach(el => { el.innerHTML = t(el.dataset.i18n); });
   document.querySelectorAll(".langs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lang === lang));
-  const [k, arg] = status;
-  $("status").textContent = typeof t(k) === "function" ? t(k)(arg) : t(k);
-  $("footer").innerHTML = t("footer");
-  const m = manifest && manifest.metrics, pct = v => (v * 100).toFixed(1) + "%";
-  $("facts").innerHTML = !m ? "" : [[pct(m.recall), t("f1")], [pct(m.reader), t("f2")], [pct(m.e2e), t("f3")], [m.vehicles, t("f4")(m.vehicles)]]
-    .map(([b, s]) => `<div class="fact"><b>${b}</b><span>${s}</span></div>`).join("");
+  const [k, ...args] = status, el = $("status");
+  el.textContent = typeof t(k) === "function" ? t(k)(...args) : t(k);
+  el.classList.toggle("bad", k === "failed" || k === "file");
+  $("notes").innerHTML = t("notes").map(n => `<p>${n}</p>`).join("");
+  const m = manifest && manifest.metrics;
+  $("funnel").innerHTML = !m ? "" : [[m.plates, t("s1")], [m.found, t("s2")], [m.read, t("s3")((m.read / m.plates * 100).toFixed(1))]]
+    .map(([n, label]) => `<div class="step"><b>${n}</b><div class="lane"><i style="width:${(n / m.plates * 100).toFixed(2)}%"></i><span>${label}</span></div></div>`).join("");
   showResults(last);
 }
 
@@ -197,7 +255,6 @@ async function fetchParts(parts, total, onBytes) {
   return out;
 }
 async function loadModels() {
-  const t0 = performance.now();
   manifest = await (await fetch("models/manifest.json")).json();
   render();
   await ortLoaded;
@@ -207,7 +264,7 @@ async function loadModels() {
   const [d, r] = await Promise.all([fetchParts(manifest.detector.parts, manifest.detector.bytes, tick), fetchParts(manifest.reader.parts, manifest.reader.bytes, tick)]);
   const opt = { executionProviders: ["wasm"] };
   sessions = { detector: await ort.InferenceSession.create(d, opt), reader: await ort.InferenceSession.create(r, opt) };
-  status = ["ready", (performance.now() - t0).toFixed(0)];
+  status = ["ready"];
   document.documentElement.dataset.ready = "1";
   render();
 }
@@ -277,33 +334,36 @@ async function analyse(src) {
   const scale = Math.min(1, 1280 / Math.max(src.width, src.height));
   view.width = Math.round(src.width * scale); view.height = Math.round(src.height * scale);
   g.drawImage(src, 0, 0, view.width, view.height);
-  view.hidden = false; $("empty").hidden = true;
-  const t0 = performance.now(), found = await detect(view), plates = [];
+  view.hidden = false; $("empty").hidden = true; $("again").hidden = false;
+  status = ["working"]; render();
+  await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));   // let the photo paint before the heavy work
+  const t0 = performance.now(), found = await detect(view), t1 = performance.now(), plates = [];
   for (const f of found) {
     const crop = cropPlate(view, f.box);
     plates.push({ ...f, crop, labels: await readPlate(crop) });
   }
-  const ms = (performance.now() - t0).toFixed(0);
-  g.lineWidth = Math.max(2, view.width / 300); g.strokeStyle = "#0f766e";
+  const detMs = (t1 - t0).toFixed(0), readMs = (performance.now() - t1).toFixed(0);
+  g.lineWidth = Math.max(3, view.width / 220); g.strokeStyle = "#f2c200";
   for (const p of plates) g.strokeRect(p.box[0], p.box[1], p.box[2] - p.box[0], p.box[3] - p.box[1]);
-  last = { plates, ms };
-  showResults(last);
+  last = { plates };
+  status = plates.length ? ["done", plates.length, detMs, readMs] : ["nothing", detMs];
+  render();
   return last;
 }
 function plateText(labels) {
   const digits = labels.filter(i => i >= LETTERS.length).map(i => CLASSES[i]).join("");
-  const letters = labels.filter(i => i < LETTERS.length).map(i => CLASSES[i]).reverse().join(" ");  // reading order
+  const letters = labels.filter(i => i < LETTERS.length).map(i => CLASSES[i]).join(" ");   // left to right, as on the plate
   return { digits, letters };
 }
+const TAG = (digits, letters, blank) => `<div class="tag${blank ? " blank" : ""}" lang="ar"><div class="band"><b>EGYPT</b><span>مصر</span></div><div class="body"><div>${digits}</div><div>${letters}</div></div></div>`;
 function showResults(r) {
   const box = $("plates");
-  if (!r) { box.innerHTML = `<p class="none">${t("waiting")}</p>`; return; }
-  if (!r.plates.length) { box.innerHTML = `<p class="none">${t("nothing")}</p>`; return; }
+  if (!r || !r.plates.length) { box.innerHTML = TAG("", "", true); return; }
   box.innerHTML = "";
   for (const p of r.plates) {
     const { digits, letters } = plateText(p.labels), row = document.createElement("div");
-    row.className = "plate";
-    row.innerHTML = `<canvas width="${RW}" height="${RH}"></canvas><div><div class="read"><span class="digits" lang="ar">${digits}</span><span class="bar"></span><span class="letters" lang="ar" dir="rtl">${letters}</span></div><div class="meta">${t("conf")((p.conf * 100).toFixed(0), r.ms)}</div></div>`;
+    row.className = "hit";
+    row.innerHTML = TAG(digits, letters, false) + `<div class="from"><canvas width="${RW}" height="${RH}"></canvas><span>${t("from")((p.conf * 100).toFixed(0))}</span></div>`;
     row.querySelector("canvas").getContext("2d").drawImage(p.crop, 0, 0);
     box.appendChild(row);
   }
@@ -312,10 +372,9 @@ function showResults(r) {
 // ---------- wiring ----------
 async function openFile(file) {
   if (!file || !file.type.startsWith("image/")) return;
-  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
-  await analyse(bmp);
+  await analyse(await createImageBitmap(file, { imageOrientation: "from-image" }));
 }
-$("file").onchange = e => openFile(e.target.files[0]);
+for (const id of ["file", "file2"]) $(id).onchange = e => { openFile(e.target.files[0]); e.target.value = ""; };
 const stage = $("stage");
 stage.ondragover = e => { e.preventDefault(); stage.classList.add("over"); };
 stage.ondragleave = () => stage.classList.remove("over");
