@@ -20,9 +20,9 @@ def main():
     out = Path(a.out)
 
     reader = load_reader(out / "reader.pt")
-    x = torch.rand(4, 1, H, W)
+    x = torch.rand(1, 1, H, W)  # batch 1: ONNX GRU export is only reliable at the traced batch size
     torch.onnx.export(reader, x, out / "reader.onnx", input_names=["plate"], output_names=["logits"],
-                      dynamic_axes={"plate": {0: "n"}, "logits": {0: "n"}}, opset_version=17, dynamo=False)
+                      opset_version=17, dynamo=False)
     import onnxruntime as ort
     got = ort.InferenceSession(str(out / "reader.onnx"), providers=["CPUExecutionProvider"]).run(None, {"plate": x.numpy()})[0]
     with torch.no_grad():
