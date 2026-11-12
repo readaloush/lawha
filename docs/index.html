@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lawha · Arabic licence plate recognition in the browser</title>
+<meta name="description" content="Pick a photo of a car: a YOLO detector finds the plate and a CRNN reads its Arabic letters and digits, entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Crect x='5' y='10' width='22' height='12' rx='2' fill='white'/%3E%3Crect x='5' y='10' width='22' height='4' rx='2' fill='%2338bdf8'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --paper: #f6f1e7; --card: #fffdf8; --ink: #1c1a17; --muted: #746d62;
+    --line: #e2d9c8; --accent: #0f766e; --accent-soft: #d6ebe7; --warn: #b45309;
+    --arabic: "Noto Naskh Arabic", "Amiri", "Scheherazade New", "Geeza Pro", "Traditional Arabic", "Segoe UI", serif;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); }
+  main { max-width: 980px; margin: 0 auto; padding: 44px 20px 56px; }
+  header { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 34px; letter-spacing: -0.02em; margin: 0; font-weight: 700; }
+  h1 span { font-family: var(--arabic); font-weight: 400; color: var(--accent); margin-inline-start: 10px; font-size: 38px; }
+  #status { font: 12px var(--mono); color: var(--muted); }
+  .lede { color: var(--muted); max-width: 62ch; margin: 0 0 22px; }
+  .seg { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+  .seg button { border: 0; background: transparent; padding: 5px 11px; border-radius: 7px; font-size: 13px; color: var(--muted); }
+  .seg button:hover { color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--card); }
+  .langs { margin-inline-start: auto; align-self: center; }
+  button, .btn { font: 600 14px var(--sans); padding: 9px 16px; border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; white-space: nowrap; }
+  button:hover, .btn:hover { border-color: var(--ink); }
+  button:focus-visible, .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
+  .btn.primary { background: var(--ink); color: var(--card); border-color: var(--ink); }
+  .btn input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } main { padding-top: 28px; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .label { font: 600 11px/1 var(--sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+  .stage { position: relative; border-radius: 10px; overflow: hidden; background: #ece5d6; border: 1px dashed var(--line); min-height: 300px; display: grid; place-items: center; }
+  .stage.over { border-color: var(--accent); background: var(--accent-soft); }
+  .stage canvas { display: block; width: 100%; height: auto; }
+  .stage .empty { color: var(--muted); text-align: center; padding: 30px; font-size: 14px; max-width: 34ch; }
+  .row { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .plates { display: grid; gap: 12px; }
+  .plate { display: grid; grid-template-columns: 132px 1fr; gap: 14px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+  .plate canvas { width: 132px; height: 66px; border-radius: 6px; background: #000; }
+  .read { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; direction: ltr; }
+  .read .digits { font: 600 30px/1.2 var(--arabic); letter-spacing: 0.04em; }
+  .read .letters { font: 600 30px/1.2 var(--arabic); color: var(--accent); word-spacing: 0.25em; }
+  .read .bar { width: 1px; align-self: stretch; background: var(--line); }
+  .meta { font: 12px var(--mono); color: var(--muted); margin-top: 2px; direction: ltr; text-align: start; }
+  .none { color: var(--muted); font-size: 14px; margin: 0; }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }
+  @media (max-width: 800px) { .facts { grid-template-columns: repeat(2, 1fr); } }
+  .fact { border-top: 2px solid var(--ink); padding-top: 10px; }
+  .fact b { display: block; font: 600 22px var(--mono); letter-spacing: -0.02em; direction: ltr; }
+  html[dir="rtl"] .fact b { text-align: end; }
+  .fact span { font-size: 13px; color: var(--muted); }
+  footer { margin-top: 28px; font-size: 13px; color: var(--muted); }
+  a { color: var(--accent); }
+  html[lang="ar"] body { font-family: var(--arabic), var(--sans); font-size: 17px; }
+  html[lang="ar"] .label { letter-spacing: 0; font-size: 13px; }
+  html[lang="ar"] #status { font-family: var(--arabic); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Lawha<span lang="ar">لوحة</span></h1>
+    <span id="status"></span>
+    <div class="langs seg" role="group" aria-label="Language">
+      <button data-lang="en" lang="en">English</button>
+      <button data-lang="tr" lang="tr">Türkçe</button>
+      <button data-lang="ar" lang="ar">العربية</button>
+    </div>
+  </header>
+  <p class="lede" data-i18n="lede"></p>
+
+  <div class="grid">
+    <section class="card">
+      <p class="label" data-i18n="photo"></p>
+      <div class="stage" id="stage">
+        <p class="empty" id="empty" data-i18n="empty"></p>
+        <canvas id="view" hidden></canvas>
+      </div>
+      <div class="row">
+        <label class="btn primary"><input type="file" id="file" accept="image/*"><span data-i18n="choose"></span></label>
+        <span class="hint" data-i18n="hint"></span>
+      </div>
+    </section>
+
+    <section class="card" aria-live="polite">
+      <p class="label" data-i18n="result"></p>
+      <div class="plates" id="plates"></div>
+    </section>
+  </div>
+
+  <div class="facts" id="facts"></div>
+  <footer id="footer"></footer>
+</main>
+
+<script>
+// onnxruntime-web: a local copy in ./ort/ is used if present (development), otherwise the CDN.
+const ORT_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+const ortLoaded = new Promise((resolve, reject) => {
+  const add = (base, next) => {
+    const s = document.createElement("script");
+    s.src = base + "ort.wasm.min.js";
+    s.onload = () => { ort.env.wasm.wasmPaths = base; ort.env.wasm.numThreads = 1; resolve(); };
+    s.onerror = next;
+    document.head.appendChild(s);
+  };
+  add(new URL("ort/", document.baseURI).href, () => add(ORT_CDN, () => reject(new Error("onnxruntime-web could not be loaded"))));
+});
+</script>
+<script>
+const $ = id => document.getElementById(id);
+const LETTERS = [..."أبجدرسصطعفقلمنهوى"], DIGITS = [..."٠١٢٣٤٥٦٧٨٩"];
+const CLASSES = [...LETTERS, ...DIGITS], BLANK = CLASSES.length;
+const DET = 640, RH = 48, RW = 144, CONF = 0.25, NMS_IOU = 0.7, PAD = 0.10;
+
+const REPO = '<a href="https://github.com/readaloush/lawha">github.com/readaloush/lawha</a>';
+const T = {
+  en: {
+    title: "Lawha · Arabic licence plate recognition in the browser",
+    lede: "Pick a photo of a car with an Egyptian plate. A YOLO detector finds the plate and a CRNN reads its Arabic letters and digits, all on your device; the photo is never uploaded.",
+    photo: "Photo", result: "Plates found", choose: "Choose a photo", hint: "or drop an image here",
+    empty: "No photo yet. Choose one or drop one here.",
+    waiting: "Results appear here.", nothing: "No plate found in this image.",
+    conf: (c, ms) => `detector confidence ${c}% · ${ms} ms`,
+    loading: p => `loading models… ${p}%`, ready: ms => `models ready · ${ms} ms`, failed: m => "could not load the models: " + m,
+    file: "opened as a file: browsers block the models here. Run  python3 -m http.server 8000  in this folder and open http://localhost:8000",
+    f1: "of test plates found by the detector", f2: "of cropped test plates read with no mistake", f3: "found and fully read, end to end", f4: () => "test vehicles the models never saw",
+    footer: `Trained on the EALPR dataset of Egyptian plates (Youssef, Sayed &amp; Ali, 2022). The data comes mostly from listings of special plates, so everyday plates and other countries' plates may read worse than the test figures; computer-drawn plates are read badly. Code and details: ${REPO}.`,
+  },
+  tr: {
+    title: "Lawha · Tarayıcıda Arapça plaka tanıma",
+    lede: "Mısır plakalı bir araç fotoğrafı seçin. Bir YOLO modeli plakayı bulur, bir CRNN de üzerindeki Arapça harf ve rakamları okur; hepsi kendi cihazınızda çalışır, fotoğraf hiçbir yere yüklenmez.",
+    photo: "Fotoğraf", result: "Bulunan plakalar", choose: "Fotoğraf seç", hint: "ya da bir görseli buraya bırakın",
+    empty: "Henüz fotoğraf yok. Bir tane seçin ya da buraya bırakın.",
+    waiting: "Sonuçlar burada görünür.", nothing: "Bu görselde plaka bulunamadı.",
+    conf: (c, ms) => `tespit güveni %${c} · ${ms} ms`,
+    loading: p => `modeller yükleniyor… %${p}`, ready: ms => `modeller hazır · ${ms} ms`, failed: m => "modeller yüklenemedi: " + m,
+    file: "sayfa dosyadan açıldı: tarayıcılar burada modelleri engeller. Bu klasörde  python3 -m http.server 8000  çalıştırıp http://localhost:8000 adresini açın",
+    f1: "test plakasını tespit modeli buldu", f2: "kesilmiş test plakası hatasız okundu", f3: "uçtan uca: bulundu ve tamamen okundu", f4: () => "modellerin hiç görmediği test aracı",
+    footer: `Mısır plakalarından oluşan EALPR veri setiyle eğitildi (Youssef, Sayed &amp; Ali, 2022). Veri çoğunlukla özel plaka ilanlarından geldiği için sıradan plakalar ve başka ülkelerin plakaları test sonuçlarından daha kötü okunabilir; bilgisayarla çizilmiş plakalar kötü okunuyor. Kod ve ayrıntılar: ${REPO}.`,
+  },
+  ar: {
+    title: "لوحة · التعرّف على لوحات السيارات العربية داخل المتصفح",
+    lede: "اختر صورة سيارة بلوحة مصرية. نموذج YOLO يحدّد مكان اللوحة، وشبكة CRNN تقرأ حروفها وأرقامها العربية، وكل ذلك على جهازك؛ الصورة لا تُرفع إلى أي مكان.",
+    photo: "الصورة", result: "اللوحات المكتشفة", choose: "اختر صورة", hint: "أو أفلِت صورة هنا",
+    empty: "لا توجد صورة بعد. اختر واحدة أو أفلِتها هنا.",
+    waiting: "تظهر النتائج هنا.", nothing: "لم يُعثر على لوحة في هذه الصورة.",
+    conf: (c, ms) => `ثقة الكاشف ${c}% · ⁦${ms} ms⁩`,
+    loading: p => `جارٍ تحميل النماذج… ${p}%`, ready: ms => `النماذج جاهزة · ⁦${ms} ms⁩`, failed: m => "تعذّر تحميل النماذج: " + m,
+    file: "فُتحت الصفحة كملف: المتصفحات تمنع تحميل النماذج هنا. شغّل  python3 -m http.server 8000  في هذا المجلد وافتح http://localhost:8000",
+    f1: "من لوحات الاختبار عثر عليها الكاشف", f2: "من لوحات الاختبار المقصوصة قُرئت بلا خطأ", f3: "عُثر عليها وقُرئت كاملةً", f4: () => "مركبة اختبار لم ترها النماذج",
+    footer: `دُرِّبت النماذج على مجموعة بيانات EALPR للوحات المصرية (Youssef, Sayed &amp; Ali, 2022). معظم البيانات من إعلانات اللوحات المميزة، لذا قد تُقرأ اللوحات العادية ولوحات الدول الأخرى بدقة أقل من أرقام الاختبار، أما اللوحات المرسومة حاسوبيًا فتُقرأ بشكل سيئ. الشيفرة والتفاصيل: ${REPO}.`,
+  },
+};
+
+let lang = "en", status = ["loading", 0], manifest = null, sessions = null, last = null;
+const t = k => T[lang][k];
+function stored(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function pickLang() {
+  if (T[stored("lawha-lang")]) return stored("lawha-lang");
+  for (const l of navigator.languages || [navigator.language || "en"]) { const c = l.toLowerCase().split("-")[0]; if (T[c]) return c; }
+  return "en";
+}
+function render() {
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+  document.title = t("title");
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.innerHTML = t(el.dataset.i18n); });
+  document.querySelectorAll(".langs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lang === lang));
+  const [k, arg] = status;
+  $("status").textContent = typeof t(k) === "function" ? t(k)(arg) : t(k);
+  $("footer").innerHTML = t("footer");
+  const m = manifest && manifest.metrics, pct = v => (v * 100).toFixed(1) + "%";
+  $("facts").innerHTML = !m ? "" : [[pct(m.recall), t("f1")], [pct(m.reader), t("f2")], [pct(m.e2e), t("f3")], [m.vehicles, t("f4")(m.vehicles)]]
+    .map(([b, s]) => `<div class="fact"><b>${b}</b><span>${s}</span></div>`).join("");
+  showResults(last);
+}
+
+// ---------- models ----------
+async function fetchParts(parts, total, onBytes) {
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) {
+    const buf = new Uint8Array(await (await fetch("models/" + p)).arrayBuffer());
+    out.set(buf, off); off += buf.length; onBytes(buf.length);
+  }
+  return out;
+}
+async function loadModels() {
+  const t0 = performance.now();
+  manifest = await (await fetch("models/manifest.json")).json();
+  render();
+  await ortLoaded;
+  const total = manifest.detector.bytes + manifest.reader.bytes;
+  let done = 0;
+  const tick = n => { done += n; status = ["loading", Math.round(done / total * 100)]; render(); };
+  const [d, r] = await Promise.all([fetchParts(manifest.detector.parts, manifest.detector.bytes, tick), fetchParts(manifest.reader.parts, manifest.reader.bytes, tick)]);
+  const opt = { executionProviders: ["wasm"] };
+  sessions = { detector: await ort.InferenceSession.create(d, opt), reader: await ort.InferenceSession.create(r, opt) };
+  status = ["ready", (performance.now() - t0).toFixed(0)];
+  document.documentElement.dataset.ready = "1";
+  render();
+}
+
+// ---------- stage 1: plate detection ----------
+const iou = (a, b) => {
+  const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])), iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const inter = ix * iy;
+  return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter + 1e-9);
+};
+async function detect(src) {
+  const w = src.width, h = src.height, s = Math.min(DET / w, DET / h);
+  const nw = Math.round(w * s), nh = Math.round(h * s), dx = (DET - nw) / 2, dy = (DET - nh) / 2;
+  const c = new OffscreenCanvas(DET, DET), g = c.getContext("2d", { willReadFrequently: true });
+  g.fillStyle = "rgb(114,114,114)"; g.fillRect(0, 0, DET, DET);
+  g.imageSmoothingQuality = "high";
+  g.drawImage(src, 0, 0, w, h, dx, dy, nw, nh);
+  const px = g.getImageData(0, 0, DET, DET).data, n = DET * DET, x = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) { x[i] = px[i * 4] / 255; x[n + i] = px[i * 4 + 1] / 255; x[2 * n + i] = px[i * 4 + 2] / 255; }
+  const out = (await sessions.detector.run({ images: new ort.Tensor("float32", x, [1, 3, DET, DET]) })).output0;
+  const d = out.data, A = out.dims[2], cand = [];
+  for (let i = 0; i < A; i++) {
+    const conf = d[4 * A + i];
+    if (conf < CONF) continue;
+    const cx = d[i], cy = d[A + i], bw = d[2 * A + i], bh = d[3 * A + i];
+    cand.push({ conf, box: [(cx - bw / 2 - dx) / s, (cy - bh / 2 - dy) / s, (cx + bw / 2 - dx) / s, (cy + bh / 2 - dy) / s] });
+  }
+  cand.sort((a, b) => b.conf - a.conf);
+  const keep = [];
+  for (const k of cand) if (keep.every(q => iou(q.box, k.box) < NMS_IOU)) keep.push(k);
+  return keep.filter(k => k.box[2] - k.box[0] >= 8 && k.box[3] - k.box[1] >= 4);
+}
+
+// ---------- stage 2: plate reading ----------
+function cropPlate(src, box) {
+  const px = (box[2] - box[0]) * PAD / 2, py = (box[3] - box[1]) * PAD / 2;
+  const x0 = Math.max(0, Math.floor(box[0] - px)), y0 = Math.max(0, Math.floor(box[1] - py));
+  const x1 = Math.min(src.width, Math.floor(box[2] + px)), y1 = Math.min(src.height, Math.floor(box[3] + py));
+  const c = document.createElement("canvas");
+  c.width = RW; c.height = RH;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.imageSmoothingQuality = "high";
+  g.drawImage(src, x0, y0, x1 - x0, y1 - y0, 0, 0, RW, RH);
+  return c;
+}
+async function readPlate(canvas) {
+  const px = canvas.getContext("2d").getImageData(0, 0, RW, RH).data, n = RW * RH, a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = (0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2]) / 255;
+  const sorted = Float32Array.from(a).sort(), lo = sorted[Math.floor(0.02 * (n - 1))], hi = sorted[Math.ceil(0.98 * (n - 1))], span = Math.max(hi - lo, 1e-3);
+  for (let i = 0; i < n; i++) a[i] = Math.min(1, Math.max(0, (a[i] - lo) / span));
+  const out = (await sessions.reader.run({ plate: new ort.Tensor("float32", a, [1, 1, RH, RW]) })).logits;
+  const [, steps, K] = out.dims, seq = [];
+  let prev = BLANK;
+  for (let s = 0; s < steps; s++) {
+    let best = 0;
+    for (let k = 1; k < K; k++) if (out.data[s * K + k] > out.data[s * K + best]) best = k;
+    if (best !== prev && best !== BLANK) seq.push(best);
+    prev = best;
+  }
+  return seq;
+}
+
+// ---------- run + display ----------
+async function analyse(src) {
+  if (!sessions) return;
+  const view = $("view"), g = view.getContext("2d");
+  const scale = Math.min(1, 1280 / Math.max(src.width, src.height));
+  view.width = Math.round(src.width * scale); view.height = Math.round(src.height * scale);
+  g.drawImage(src, 0, 0, view.width, view.height);
+  view.hidden = false; $("empty").hidden = true;
+  const t0 = performance.now(), found = await detect(view), plates = [];
+  for (const f of found) {
+    const crop = cropPlate(view, f.box);
+    plates.push({ ...f, crop, labels: await readPlate(crop) });
+  }
+  const ms = (performance.now() - t0).toFixed(0);
+  g.lineWidth = Math.max(2, view.width / 300); g.strokeStyle = "#0f766e";
+  for (const p of plates) g.strokeRect(p.box[0], p.box[1], p.box[2] - p.box[0], p.box[3] - p.box[1]);
+  last = { plates, ms };
+  showResults(last);
+  return last;
+}
+function plateText(labels) {
+  const digits = labels.filter(i => i >= LETTERS.length).map(i => CLASSES[i]).join("");
+  const letters = labels.filter(i => i < LETTERS.length).map(i => CLASSES[i]).reverse().join(" ");  // reading order
+  return { digits, letters };
+}
+function showResults(r) {
+  const box = $("plates");
+  if (!r) { box.innerHTML = `<p class="none">${t("waiting")}</p>`; return; }
+  if (!r.plates.length) { box.innerHTML = `<p class="none">${t("nothing")}</p>`; return; }
+  box.innerHTML = "";
+  for (const p of r.plates) {
+    const { digits, letters } = plateText(p.labels), row = document.createElement("div");
+    row.className = "plate";
+    row.innerHTML = `<canvas width="${RW}" height="${RH}"></canvas><div><div class="read"><span class="digits" lang="ar">${digits}</span><span class="bar"></span><span class="letters" lang="ar" dir="rtl">${letters}</span></div><div class="meta">${t("conf")((p.conf * 100).toFixed(0), r.ms)}</div></div>`;
+    row.querySelector("canvas").getContext("2d").drawImage(p.crop, 0, 0);
+    box.appendChild(row);
+  }
+}
+
+// ---------- wiring ----------
+async function openFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  await analyse(bmp);
+}
+$("file").onchange = e => openFile(e.target.files[0]);
+const stage = $("stage");
+stage.ondragover = e => { e.preventDefault(); stage.classList.add("over"); };
+stage.ondragleave = () => stage.classList.remove("over");
+stage.ondrop = e => { e.preventDefault(); stage.classList.remove("over"); openFile(e.dataTransfer.files[0]); };
+document.querySelectorAll(".langs button").forEach(b => { b.onclick = () => { lang = b.dataset.lang; store("lawha-lang", lang); render(); }; });
+lang = pickLang();
+render();
+loadModels().catch(err => { status = location.protocol === "file:" ? ["file"] : ["failed", err.message]; render(); });
+
+// Hooks used by tests/browser_check.py
+window.lawha = { analyse, CLASSES };
+</script>
+</body>
+</html>
