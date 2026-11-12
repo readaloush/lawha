@@ -1,0 +1,7 @@
+data/
+__pycache__/
+*.pyc
+.venv/
+results/runs/
+*.pt
+!results/reader_fp16.pt
