@@ -1,0 +1,57 @@
+{
+ "split": "test",
+ "vehicles": 313,
+ "reader_on_dataset_crops": {
+  "plates": 299,
+  "plate_accuracy": 0.9364548494983278,
+  "cer": 0.018598884066955982,
+  "char_errors": 30,
+  "chars": 1613,
+  "accuracy_by_length": {
+   "1": {
+    "plates": 2,
+    "accuracy": 0.0
+   },
+   "2": {
+    "plates": 23,
+    "accuracy": 1.0
+   },
+   "3": {
+    "plates": 31,
+    "accuracy": 0.8709677419354839
+   },
+   "4": {
+    "plates": 36,
+    "accuracy": 0.9166666666666666
+   },
+   "5": {
+    "plates": 7,
+    "accuracy": 0.7142857142857143
+   },
+   "6": {
+    "plates": 107,
+    "accuracy": 0.9439252336448598
+   },
+   "7": {
+    "plates": 93,
+    "accuracy": 0.978494623655914
+   }
+  }
+ },
+ "detector": {
+  "ground_truth_plates": 323,
+  "true_positives": 321,
+  "false_positives": 8,
+  "precision": 0.9756838905775076,
+  "recall": 0.9938080495356038,
+  "iou_threshold": 0.5,
+  "confidence_threshold": 0.25
+ },
+ "end_to_end": {
+  "plates": 299,
+  "plate_accuracy": 0.9230769230769231,
+  "cer": 0.04339739615623062,
+  "missed_by_detector": 2,
+  "misread": 21
+ }
+}
